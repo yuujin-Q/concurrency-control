@@ -25,11 +25,9 @@ using std::string;
 // the four parts of assignment 2, plus a simple serial (non-concurrent) mode.
 enum CCMode {
   SERIAL = 0,                  // Serial transaction execution (no concurrency)
-  LOCKING_EXCLUSIVE_ONLY = 1,  // Part 1A
-  LOCKING = 2,                 // Part 1B
-  OCC = 3,                     // Part 2
-  P_OCC = 4,                   // Part 3
-  MVCC = 5,
+  LOCKING = 1,                 // Part 1 - 2PL Shared & Exclusive
+  OCC = 2,                     // Part 2
+  MVCC = 3,
 };
 
 // Returns a human-readable string naming of the providing mode.

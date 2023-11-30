@@ -10,10 +10,8 @@
 string ModeToString(CCMode mode) {
   switch (mode) {
     case SERIAL:                 return " Serial   ";
-    case LOCKING_EXCLUSIVE_ONLY: return " Locking A";
-    case LOCKING:                return " Locking B";
+    case LOCKING:                return " 2PL      ";
     case OCC:                    return " OCC      ";
-    case P_OCC:                  return " OCC-P    ";
     case MVCC:                   return " MVCC     ";
     default:                     return "INVALID MODE";
   }
@@ -139,7 +137,10 @@ int main(int argc, char** argv) {
 
   cpu_set_t cs;
   CPU_ZERO(&cs);
+
+  // Adjust to CPU count
   CPU_SET(7, &cs);
+  
   int ret = sched_setaffinity(0, sizeof(cs), &cs);
   if (ret) {
     perror("sched_setaffinity");

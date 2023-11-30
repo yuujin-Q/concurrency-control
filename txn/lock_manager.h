@@ -113,25 +113,12 @@ protected:
   unordered_map<Txn*, int> txn_waits_;
 };
 
-// Version of the LockManager implementing ONLY exclusive locks.
+// Version of the LockManager implementing both shared and exclusive locks (2PL).
 class LockManagerA : public LockManager
 {
 public:
   explicit LockManagerA(deque<Txn *> *ready_txns);
   inline virtual ~LockManagerA() {}
-
-  virtual bool ReadLock(Txn *txn, const Key &key);
-  virtual bool WriteLock(Txn *txn, const Key &key);
-  virtual void Release(Txn *txn, const Key &key);
-  virtual LockMode Status(const Key &key, vector<Txn *> *owners);
-};
-
-// Version of the LockManager implementing both shared and exclusive locks.
-class LockManagerB : public LockManager
-{
-public:
-  explicit LockManagerB(deque<Txn *> *ready_txns);
-  inline virtual ~LockManagerB() {}
 
   virtual bool ReadLock(Txn *txn, const Key &key);
   virtual bool WriteLock(Txn *txn, const Key &key);
