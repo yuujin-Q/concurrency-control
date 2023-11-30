@@ -1,9 +1,9 @@
-#include "lock_manager.h"
+#include "txn/lock_manager.h"
 
 #include <set>
 #include <string>
 
-#include "../utils/testing.h"
+#include "utils/testing.h"
 
 using std::set;
 
