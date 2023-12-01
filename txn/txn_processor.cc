@@ -7,7 +7,7 @@
 // Thread & queue counts for StaticThreadPool initialization.
 #define THREAD_COUNT 8
 
-bool LOGGING = true;
+bool LOGGING = false;
 
 TxnProcessor::TxnProcessor(CCMode mode)
     : mode_(mode), tp_(THREAD_COUNT), next_unique_id_(1)
@@ -420,29 +420,82 @@ void TxnProcessor::RunOCCScheduler()
   }
 }
 
-void TxnProcessor::RunOCCParallelScheduler()
-{
-  //
-  // Implement this method! Note that implementing OCC with parallel
-  // validation may need to create another method, like
-  // TxnProcessor::ExecuteTxnParallel.
-  // Note that you can use active_set_ and active_set_mutex_ we provided
-  // for you in the txn_processor.h
-  //
-  // [For now, run serial scheduler in order to make it through the test
-  // suite]
-  RunSerialScheduler();
+void TxnProcessor::MVCCExecuteTxn(Txn* txn) {
+  // Read all necessary data for this transaction from storage 
+  //    (Note that unlike the version of MVCC from class, you should lock the key before each read)
+  // read for readset
+  for (auto read_key : txn->readset_) {
+    Value result;
+    storage_->Lock(read_key);
+    if (storage_->Read(read_key, &result)) {
+      txn->reads_[read_key] = result;
+    }
+    storage_->Unlock(read_key);
+  }
+
+  // read for writeset
+  for (auto write_key : txn->writeset_) {
+    Value result;
+    storage_->Lock(write_key);
+    if (storage_->Read(write_key, &result)) {
+      txn->reads_[write_key] = result;
+    }
+    storage_->Unlock(write_key);
+  }
+
+  // Execute the transaction logic (i.e. call Run() on the transaction)
+  txn->Run();
+
+  // Acquire all locks for keys in the write_set_
+  // Call MVCCStorage::CheckWrite method to check all keys in the write_set_
+  bool passed = true;
+  for (auto write_key : txn->writeset_) {
+    storage_->Lock(write_key);
+    if (!storage_->CheckWrite(write_key, txn->unique_id_)) {
+      passed = false;
+      break;
+    }
+  }
+
+  // check if writes valid
+  if (passed) {
+    // passed, Apply the writes
+    txn->status_ = COMPLETED_C;
+    ApplyWrites(txn);
+    txn->status_ = COMMITTED;    
+    txn_results_.Push(txn);
+  } else {
+    // cleanup txn
+    txn->reads_.clear();
+    txn->writes_.clear();
+    txn->status_ = INCOMPLETE;
+
+    // completely restart the transaction
+    mutex_.Lock();
+    txn->unique_id_ = next_unique_id_;
+    next_unique_id_++;
+    txn_requests_.Push(txn);
+    mutex_.Unlock(); 
+  }
+
+  // Release all locks for keys in the write_set_
+  for (auto keys : txn->writeset_) {
+    storage_->Unlock(keys);
+  }
 }
 
-void TxnProcessor::RunMVCCScheduler()
-{
-  //
-  // Implement this method!
+void TxnProcessor::RunMVCCScheduler() {
+  // MVCC
+  Txn *txn;
 
-  // Hint:Pop a txn from txn_requests_, and pass it to a thread to execute.
-  // Note that you may need to create another execute method, like TxnProcessor::MVCCExecuteTxn.
-  //
-  // [For now, run serial scheduler in order to make it through the test
-  // suite]
-  RunSerialScheduler();
+  // check for active transaction requests in pool
+  // Pop a txn from txn_requests_, and pass it to a thread to execute. 
+  while (tp_.Active()) {
+    // get next new transaction request 
+    if (txn_requests_.Pop(&txn)) {
+      // transaction is pending, pass to exec thread
+      tp_.RunTask(new Method<TxnProcessor, void, Txn *>(this, &TxnProcessor::MVCCExecuteTxn, txn));
+    }
+  }
 }
+

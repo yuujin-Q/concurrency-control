@@ -73,8 +73,8 @@ private:
   // OCC version of scheduler.
   void RunOCCScheduler();
 
-  // OCC version of scheduler with parallel validation.
-  void RunOCCParallelScheduler();
+  // // OCC version of scheduler with parallel validation.
+  // void RunOCCParallelScheduler();
 
   // MVCC version of scheduler.
   void RunMVCCScheduler();
@@ -93,13 +93,13 @@ private:
   // The following functions are for MVCC
   void MVCCExecuteTxn(Txn *txn);
 
-  bool MVCCCheckWrites(Txn *txn);
+  // bool MVCCCheckWrites(Txn *txn);
 
-  void MVCCLockWriteKeys(Txn *txn);
+  // void MVCCLockWriteKeys(Txn *txn);
 
-  void MVCCUnlockWriteKeys(Txn *txn);
+  // void MVCCUnlockWriteKeys(Txn *txn);
 
-  void GarbageCollection();
+  // void GarbageCollection();
 
   // Concurrency control mechanism the TxnProcessor is currently using.
   CCMode mode_;
