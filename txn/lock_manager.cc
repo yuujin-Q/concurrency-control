@@ -29,14 +29,15 @@ bool LockManagerA::WriteLock(Txn *txn, const Key &key)
     }
     return true;
   }
-  // if not found
   if (waiting_tx_it == txn_waits_.end()) // insert to waiting tx if not in waiting tx
   {
     txn_waits_.insert(make_pair(txn, 1));
   }
   deque<LockRequest> *lock_requests = it->second;
   lock_requests->push_back(LockRequest(EXCLUSIVE, txn)); // add to lock requests in the key
-  return false;
+  vector<Txn*> owners = vector<Txn*>{};
+  LockMode mode = this->Status(key, &owners);
+  return mode != UNLOCKED && owners[0] == txn;
 }
 
 bool LockManagerA::ReadLock(Txn *txn, const Key &key)
@@ -69,13 +70,13 @@ bool LockManagerA::ReadLock(Txn *txn, const Key &key)
     }
     return true;
   }
-  // if not found
+  // the status is exclusive then process after the exclusive 
   if (waiting_tx_it != txn_waits_.end()) // insert to waiting tx if not in waiting tx
   {
     txn_waits_.insert(std::make_pair(txn, 1));
   }
   deque<LockRequest> *lock_requests = it->second;
-  lock_requests->push_front(LockRequest(SHARED, txn)); // add to lock requests in the key
+  lock_requests->push_back(LockRequest(SHARED, txn)); // add to lock requests in the key
   return false;
 }
 
@@ -103,7 +104,7 @@ void LockManagerA::Release(Txn *txn, const Key &key)
         }
         lock_requests->erase(req_it);
         auto next_it = lock_requests->begin();
-        if (next_it->mode_ != EXCLUSIVE || next_it == lock_requests->end())
+        if (next_it == lock_requests->end())
         {
           break;
         }
