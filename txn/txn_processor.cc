@@ -7,7 +7,7 @@
 // Thread & queue counts for StaticThreadPool initialization.
 #define THREAD_COUNT 8
 
-bool LOGGING = false;
+bool LOGGING = true;
 
 TxnProcessor::TxnProcessor(CCMode mode)
     : mode_(mode), tp_(THREAD_COUNT), next_unique_id_(1)
@@ -152,14 +152,14 @@ void TxnProcessor::ProcessTxn(Txn *txn)
   for (set<Key>::iterator it = txn->readset_.begin();
        it != txn->readset_.end(); ++it)
   {
-    if (LOGGING)
-    {
-      printf("[%ld] Acquiring read lock for readset for key: %ld \n", txn->unique_id_, *it);
-    }
     mutex_.Lock();
     bool lockObtained = lm_->ReadLock(txn, *it);
     mutex_.Unlock();
     // we block the transaction while the lock is not obtained
+    if (LOGGING)
+    {
+      printf("[%ld] Acquiring read lock for readset for key: %ld \n", txn->unique_id_, *it);
+    }
     while (!lockObtained)
     {
       vector<Txn *> owners;
@@ -168,9 +168,11 @@ void TxnProcessor::ProcessTxn(Txn *txn)
       lm_->Status(*it, &owners);
       if (owners.size() > 0)
       {
-        // if the owner is a "younger" transaction / arrives later
-        if (owners[0]->unique_id_ > txn->unique_id_)
+        // if the owner is an "older" transaction / arrives later
+        if (owners[0]->unique_id_ < txn->unique_id_)
         {
+          if (LOGGING)
+            printf("[%ld] Rolling back \n", txn->unique_id_);
           // we rollback this transaction at once
           this->ReleaseLocks(txn);
           it = txn->readset_.begin();
@@ -178,9 +180,13 @@ void TxnProcessor::ProcessTxn(Txn *txn)
           break;
         }
       }
-      lockObtained = lm_->ReadLock(txn, *it); 
+      lockObtained = lm_->ReadLock(txn, *it);
       mutex_.Unlock();
     };
+    if (LOGGING)
+    {
+      printf("[%ld] Successfully acquired read lock [%ld]\n", txn->unique_id_, *it);
+    }
   }
   // now we process the writesets
   for (set<Key>::iterator it = txn->writeset_.begin();
@@ -201,9 +207,11 @@ void TxnProcessor::ProcessTxn(Txn *txn)
       // we check the current owner of the lock
       if (owners.size() > 0)
       {
-        if (owners[0]->unique_id_ > txn->unique_id_)
+        if (owners[0]->unique_id_ < txn->unique_id_)
         {
           // rollback if the owner is a younger transaction
+          if (LOGGING)
+            printf("[%ld] Rolling back \n", txn->unique_id_);
           this->ReleaseLocks(txn);
           it = txn->writeset_.begin();
           mutex_.Unlock();
@@ -247,7 +255,7 @@ void TxnProcessor::ProcessTxn(Txn *txn)
   mutex_.Lock();
   this->ReleaseLocks(txn);
   mutex_.Unlock();
-  
+
   // Return result to client.
   txn_results_.Push(txn);
   if (LOGGING)
@@ -263,7 +271,7 @@ void TxnProcessor::ReleaseLocks(Txn *txn)
   {
     if (LOGGING)
     {
-      printf("[%ld] Releasing lock due to rollback: %ld \n", txn->unique_id_, *it);
+      printf("[%ld] Releasing lock: %ld \n", txn->unique_id_, *it);
     }
     lm_->Release(txn, *it);
   }
@@ -273,7 +281,7 @@ void TxnProcessor::ReleaseLocks(Txn *txn)
   {
     if (LOGGING)
     {
-      printf("[%ld] Releasing lock due to rollback: %ld \n", txn->unique_id_, *it);
+      printf("[%ld] Releasing lock: %ld \n", txn->unique_id_, *it);
     }
     lm_->Release(txn, *it);
   }
@@ -312,7 +320,7 @@ void TxnProcessor::ExecuteTxn(Txn *txn)
   completed_txns_.Push(txn);
   if (LOGGING)
   {
-    printf("[!] Current completed txns count: %d", completed_txns_.Size());
+    printf("[!] Current completed txns count: %d\n", completed_txns_.Size());
   }
 }
 
