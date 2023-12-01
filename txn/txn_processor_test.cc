@@ -92,6 +92,10 @@ void Benchmark(const vector<LoadGen *> &lg)
        mode <= MVCC;
        mode = static_cast<CCMode>(mode + 1))
   {
+    // FILTER modes for testing
+    // if (mode != SERIAL && mode != MVCC) {
+    //   continue;
+    // }
         // Print out mode name.
     cout << ModeToString(mode) << flush;
 
