@@ -149,7 +149,7 @@ int main(int argc, char **argv)
   CPU_ZERO(&cs);
 
   // Adjust to CPU count
-  CPU_SET(7, &cs);
+  CPU_SET(3, &cs);
 
   int ret = sched_setaffinity(0, sizeof(cs), &cs);
   if (ret)
