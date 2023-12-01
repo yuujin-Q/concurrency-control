@@ -5,22 +5,13 @@
 #include <sched.h>
 
 // Returns a human-readable string naming of the providing mode.
-string ModeToString(CCMode mode)
-{
-  switch (mode)
-  {
-  case SERIAL:
-    return " Serial   ";
-  case LOCKING:
-    return " Locking A";
-  case OCC:
-    return " OCC      ";
-  case P_OCC:
-    return " OCC-P    ";
-  case MVCC:
-    return " MVCC     ";
-  default:
-    return "INVALID MODE";
+string ModeToString(CCMode mode) {
+  switch (mode) {
+    case SERIAL:                 return " Serial   ";
+    case LOCKING:                return " 2PL      ";
+    case OCC:                    return " OCC      ";
+    case MVCC:                   return " MVCC     ";
+    default:                     return "INVALID MODE";
   }
 }
 
@@ -149,7 +140,10 @@ int main(int argc, char **argv)
 
   cpu_set_t cs;
   CPU_ZERO(&cs);
+
+  // Adjust to CPU count
   CPU_SET(7, &cs);
+  
   int ret = sched_setaffinity(0, sizeof(cs), &cs);
   if (ret)
   {

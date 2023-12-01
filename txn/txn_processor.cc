@@ -77,24 +77,12 @@ Txn *TxnProcessor::GetTxnResult()
   return txn;
 }
 
-void TxnProcessor::RunScheduler()
-{
-  switch (mode_)
-  {
-  case SERIAL:
-    RunSerialScheduler();
-    break;
-  case LOCKING:
-    RunLockingScheduler();
-    break;
-  case OCC:
-    RunOCCScheduler();
-    break;
-  case P_OCC:
-    RunOCCParallelScheduler();
-    break;
-  case MVCC:
-    RunMVCCScheduler();
+void TxnProcessor::RunScheduler() {
+  switch (mode_) {
+    case SERIAL:                 RunSerialScheduler(); break;
+    case LOCKING:                RunLockingScheduler(); break;
+    case OCC:                    RunOCCScheduler(); break;
+    case MVCC:                   RunMVCCScheduler();
   }
 }
 
@@ -340,15 +328,80 @@ void TxnProcessor::ApplyWrites(Txn *txn)
   }
 }
 
-void TxnProcessor::RunOCCScheduler()
-{
-  //
-  // Implement this method!
-  //
-  // [For now, run serial scheduler in order to make it through the test
-  // suite]
+void TxnProcessor::RunOCCScheduler() {
+  // Serial OCC/Validation-Based Protocol
+  Txn *txn;
 
-  RunSerialScheduler();
+  // check for active transaction requests in pool
+  while (tp_.Active()) {
+    // get next new transaction request 
+    if (txn_requests_.Pop(&txn)) {
+      // transaction is pending, pass to exec thread
+      txn->occ_start_time_ = GetTime();
+
+      tp_.RunTask(new Method<TxnProcessor, void, Txn *>(this, &TxnProcessor::ExecuteTxn, txn));
+    }
+
+    // check completed transactions (not committed/aborted)
+    while (completed_txns_.Pop(&txn)) {
+      bool validationFailed = false;
+
+      // validation phase, check for transaction validity
+      // check timestamp for each record whose key appears in the txn s read and write sets
+
+      // check readset
+      for (auto itr = txn->readset_.begin(); itr != txn->readset_.end(); itr++) {
+        double recordUpdateTime = storage_->Timestamp(*itr);
+
+        // check if the record was last updated AFTER this transaction s start time
+        // valid condition: data_modify_time < txn_start_time
+        if ( recordUpdateTime > txn->occ_start_time_) {
+          // failed validation
+          validationFailed = true;
+          break;
+        }
+      }
+
+      // check writeset
+      for (auto itr = txn->writeset_.begin(); itr != txn->writeset_.end(); itr++) {
+        double recordUpdateTime = storage_->Timestamp(*itr);
+
+        // check if the record was last updated AFTER this transaction s start time
+        // valid condition: data_modify_time < txn_start_time
+        if ( recordUpdateTime > txn->occ_start_time_) {
+          // failed validation
+          validationFailed = true;
+          break;
+        }
+      }
+
+      // DECISION: abort/commit
+      if (validationFailed) {
+        // ABORT transaction, RESTART transaction
+        // cleanup txn
+        txn->reads_.clear();
+        txn->writes_.clear();
+        txn->status_ = INCOMPLETE;
+
+        // restart txn
+        mutex_.Lock();
+        txn->unique_id_ = next_unique_id_;
+        next_unique_id_++;
+        txn_requests_.Push(txn);
+        mutex_.Unlock(); 
+      } else {
+        // COMMIT
+        // write to storage
+        txn->status_ = COMPLETED_C;
+        ApplyWrites(txn);
+
+        // set as commited, push to result
+        txn->status_ = COMMITTED;
+        txn_results_.Push(txn);
+      }
+    }
+
+  }
 }
 
 void TxnProcessor::RunOCCParallelScheduler()
