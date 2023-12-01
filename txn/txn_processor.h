@@ -22,10 +22,11 @@ using std::string;
 
 // The TxnProcessor supports five different execution modes, corresponding to
 // the four parts of assignment 2, plus a simple serial (non-concurrent) mode.
-enum CCMode {
-  SERIAL = 0,                  // Serial transaction execution (no concurrency)
-  LOCKING = 1,                 // Part 1 - 2PL Shared & Exclusive
-  OCC = 2,                     // Part 2
+enum CCMode
+{
+  SERIAL = 0,  // Serial transaction execution (no concurrency)
+  LOCKING = 1, // Part 1 - 2PL Shared & Exclusive
+  OCC = 2,     // Part 2
   MVCC = 3,
 };
 
@@ -80,7 +81,8 @@ private:
 
   // Performs all reads required to execute the transaction, then executes the
   // transaction logic.
-  bool RollbackTxn(Key key, Txn *txn);
+
+  void ReleaseLocks(Txn *txn);
   void ExecuteTxn(Txn *txn);
   void ProcessTxn(Txn *txn);
   // Applies all writes performed by '*txn' to 'storage_'.

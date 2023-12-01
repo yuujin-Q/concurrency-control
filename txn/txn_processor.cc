@@ -7,7 +7,7 @@
 // Thread & queue counts for StaticThreadPool initialization.
 #define THREAD_COUNT 8
 
-bool LOGGING = true;
+bool LOGGING = false;
 
 TxnProcessor::TxnProcessor(CCMode mode)
     : mode_(mode), tp_(THREAD_COUNT), next_unique_id_(1)
@@ -77,12 +77,21 @@ Txn *TxnProcessor::GetTxnResult()
   return txn;
 }
 
-void TxnProcessor::RunScheduler() {
-  switch (mode_) {
-    case SERIAL:                 RunSerialScheduler(); break;
-    case LOCKING:                RunLockingScheduler(); break;
-    case OCC:                    RunOCCScheduler(); break;
-    case MVCC:                   RunMVCCScheduler();
+void TxnProcessor::RunScheduler()
+{
+  switch (mode_)
+  {
+  case SERIAL:
+    RunSerialScheduler();
+    break;
+  case LOCKING:
+    RunLockingScheduler();
+    break;
+  case OCC:
+    RunOCCScheduler();
+    break;
+  case MVCC:
+    RunMVCCScheduler();
   }
 }
 
@@ -124,10 +133,11 @@ void TxnProcessor::RunLockingScheduler()
   Txn *txn;
   while (tp_.Active())
   {
-    // printf("[!] Request txn size: %d\n", txn_requests_.Size());
-    // Start processing the next incoming transaction request.
+    // Take transaction from requests
     if (txn_requests_.Pop(&txn))
     {
+      // for the transaction taken, we run it on a new thread
+      // so that each transaction runs on their own thread
       tp_.RunTask(new Method<TxnProcessor, void, Txn *>(
           this,
           &TxnProcessor::ProcessTxn,
@@ -138,6 +148,7 @@ void TxnProcessor::RunLockingScheduler()
 
 void TxnProcessor::ProcessTxn(Txn *txn)
 {
+  // we process the readset
   for (set<Key>::iterator it = txn->readset_.begin();
        it != txn->readset_.end(); ++it)
   {
@@ -148,45 +159,30 @@ void TxnProcessor::ProcessTxn(Txn *txn)
     mutex_.Lock();
     bool lockObtained = lm_->ReadLock(txn, *it);
     mutex_.Unlock();
+    // we block the transaction while the lock is not obtained
     while (!lockObtained)
     {
       vector<Txn *> owners;
       mutex_.Lock();
+      // we check the current owner of the lock
       lm_->Status(*it, &owners);
       if (owners.size() > 0)
       {
+        // if the owner is a "younger" transaction / arrives later
         if (owners[0]->unique_id_ > txn->unique_id_)
         {
-          // rollback
-          for (set<Key>::iterator it = txn->readset_.begin();
-               it != txn->readset_.end(); ++it)
-          {
-            if (LOGGING)
-            {
-              printf("[%ld] Releasing lock due to rollback: %ld \n", txn->unique_id_, *it);
-            }
-            lm_->Release(txn, *it);
-          }
-
-          for (set<Key>::iterator it = txn->writeset_.begin();
-               it != txn->writeset_.end(); ++it)
-          {
-            if (LOGGING)
-            {
-              printf("[%ld] Releasing lock due to rollback: %ld \n", txn->unique_id_, *it);
-            }
-            lm_->Release(txn, *it);
-          }
+          // we rollback this transaction at once
+          this->ReleaseLocks(txn);
           it = txn->readset_.begin();
           mutex_.Unlock();
           break;
         }
       }
-      lockObtained = lm_->ReadLock(txn, *it);
+      lockObtained = lm_->ReadLock(txn, *it); 
       mutex_.Unlock();
     };
   }
-
+  // now we process the writesets
   for (set<Key>::iterator it = txn->writeset_.begin();
        it != txn->writeset_.end(); ++it)
   {
@@ -197,29 +193,18 @@ void TxnProcessor::ProcessTxn(Txn *txn)
     mutex_.Lock();
     bool lockObtained = lm_->WriteLock(txn, *it);
     mutex_.Unlock();
-    while (!lockObtained)
+    while (!lockObtained) // we block the process while the lock is not obtained
     {
       mutex_.Lock();
       vector<Txn *> owners;
       lm_->Status(*it, &owners);
+      // we check the current owner of the lock
       if (owners.size() > 0)
       {
         if (owners[0]->unique_id_ > txn->unique_id_)
         {
-          // rollback
-          for (set<Key>::iterator it = txn->readset_.begin();
-               it != txn->readset_.end(); ++it)
-          {
-            // printf("[!] Releasing lock: %ld \n", *it);
-            lm_->Release(txn, *it);
-          }
-
-          for (set<Key>::iterator it = txn->writeset_.begin();
-               it != txn->writeset_.end(); ++it)
-          {
-            // printf("[!] Releasing lock: %ld from transaction: %ld\n", *it, txn->unique_id_);
-            lm_->Release(txn, *it);
-          }
+          // rollback if the owner is a younger transaction
+          this->ReleaseLocks(txn);
           it = txn->writeset_.begin();
           mutex_.Unlock();
           break;
@@ -233,10 +218,12 @@ void TxnProcessor::ProcessTxn(Txn *txn)
       printf("[%ld] Successfully acquired write lock [%ld]\n", txn->unique_id_, *it);
     }
   }
+  // at this point we have obtained all the lock for the txn we need so we can execute it
   this->ExecuteTxn(txn);
   // Commit/abort txn according to program logic's commit/abort decision.
 
   TxnStatus status = txn->Status();
+  // we commit the transaction
   if (status == COMPLETED_C)
   {
     if (LOGGING)
@@ -255,29 +242,40 @@ void TxnProcessor::ProcessTxn(Txn *txn)
     // Invalid TxnStatus!
     DIE("Completed Txn has invalid TxnStatus: " << status);
   }
+
   // Release read locks.
   mutex_.Lock();
-  for (set<Key>::iterator it = txn->readset_.begin();
-       it != txn->readset_.end(); ++it)
-  {
-    lm_->Release(txn, *it);
-  }
-  // Release write locks.
-  for (set<Key>::iterator it = txn->writeset_.begin();
-       it != txn->writeset_.end(); ++it)
-  {
-    if (LOGGING)
-    {
-      printf("[!] Releasing write lock from transaction %ld for key %ld\n", txn->unique_id_, *it);
-    }
-    lm_->Release(txn, *it);
-  }
+  this->ReleaseLocks(txn);
   mutex_.Unlock();
+  
   // Return result to client.
   txn_results_.Push(txn);
   if (LOGGING)
   {
     printf("[!] Finished pusing to client\n");
+  }
+}
+
+void TxnProcessor::ReleaseLocks(Txn *txn)
+{
+  for (set<Key>::iterator it = txn->readset_.begin();
+       it != txn->readset_.end(); ++it)
+  {
+    if (LOGGING)
+    {
+      printf("[%ld] Releasing lock due to rollback: %ld \n", txn->unique_id_, *it);
+    }
+    lm_->Release(txn, *it);
+  }
+
+  for (set<Key>::iterator it = txn->writeset_.begin();
+       it != txn->writeset_.end(); ++it)
+  {
+    if (LOGGING)
+    {
+      printf("[%ld] Releasing lock due to rollback: %ld \n", txn->unique_id_, *it);
+    }
+    lm_->Release(txn, *it);
   }
 }
 
@@ -328,14 +326,17 @@ void TxnProcessor::ApplyWrites(Txn *txn)
   }
 }
 
-void TxnProcessor::RunOCCScheduler() {
+void TxnProcessor::RunOCCScheduler()
+{
   // Serial OCC/Validation-Based Protocol
   Txn *txn;
 
   // check for active transaction requests in pool
-  while (tp_.Active()) {
-    // get next new transaction request 
-    if (txn_requests_.Pop(&txn)) {
+  while (tp_.Active())
+  {
+    // get next new transaction request
+    if (txn_requests_.Pop(&txn))
+    {
       // transaction is pending, pass to exec thread
       txn->occ_start_time_ = GetTime();
 
@@ -343,19 +344,22 @@ void TxnProcessor::RunOCCScheduler() {
     }
 
     // check completed transactions (not committed/aborted)
-    while (completed_txns_.Pop(&txn)) {
+    while (completed_txns_.Pop(&txn))
+    {
       bool validationFailed = false;
 
       // validation phase, check for transaction validity
       // check timestamp for each record whose key appears in the txn s read and write sets
 
       // check readset
-      for (auto itr = txn->readset_.begin(); itr != txn->readset_.end(); itr++) {
+      for (auto itr = txn->readset_.begin(); itr != txn->readset_.end(); itr++)
+      {
         double recordUpdateTime = storage_->Timestamp(*itr);
 
         // check if the record was last updated AFTER this transaction s start time
         // valid condition: data_modify_time < txn_start_time
-        if ( recordUpdateTime > txn->occ_start_time_) {
+        if (recordUpdateTime > txn->occ_start_time_)
+        {
           // failed validation
           validationFailed = true;
           break;
@@ -363,12 +367,14 @@ void TxnProcessor::RunOCCScheduler() {
       }
 
       // check writeset
-      for (auto itr = txn->writeset_.begin(); itr != txn->writeset_.end(); itr++) {
+      for (auto itr = txn->writeset_.begin(); itr != txn->writeset_.end(); itr++)
+      {
         double recordUpdateTime = storage_->Timestamp(*itr);
 
         // check if the record was last updated AFTER this transaction s start time
         // valid condition: data_modify_time < txn_start_time
-        if ( recordUpdateTime > txn->occ_start_time_) {
+        if (recordUpdateTime > txn->occ_start_time_)
+        {
           // failed validation
           validationFailed = true;
           break;
@@ -376,7 +382,8 @@ void TxnProcessor::RunOCCScheduler() {
       }
 
       // DECISION: abort/commit
-      if (validationFailed) {
+      if (validationFailed)
+      {
         // ABORT transaction, RESTART transaction
         // cleanup txn
         txn->reads_.clear();
@@ -388,8 +395,10 @@ void TxnProcessor::RunOCCScheduler() {
         txn->unique_id_ = next_unique_id_;
         next_unique_id_++;
         txn_requests_.Push(txn);
-        mutex_.Unlock(); 
-      } else {
+        mutex_.Unlock();
+      }
+      else
+      {
         // COMMIT
         // write to storage
         txn->status_ = COMPLETED_C;
@@ -400,7 +409,6 @@ void TxnProcessor::RunOCCScheduler() {
         txn_results_.Push(txn);
       }
     }
-
   }
 }
 

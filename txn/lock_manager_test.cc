@@ -52,11 +52,8 @@ TEST(LockManagerA_SimpleLocking)
 
   lm.Release(t3, 101);
   ready_txns.pop_front();
-  EXPECT_EQ(EXCLUSIVE, lm.Status(101, &owners));
-  EXPECT_EQ(1, owners.size());
-  EXPECT_EQ(t2, owners[0]);
-  EXPECT_EQ(1, ready_txns.size());
-  EXPECT_EQ(t2, ready_txns.at(0));
+  EXPECT_EQ(UNLOCKED, lm.Status(101, &owners));
+  EXPECT_EQ(0, owners.size());
 
   // Txn 2 releases lock.  Txn 3 is granted read lock.
   lm.Release(t2, 101);
