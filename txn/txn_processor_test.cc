@@ -92,7 +92,7 @@ void Benchmark(const vector<LoadGen *> &lg)
        mode <= MVCC;
        mode = static_cast<CCMode>(mode + 1))
   {
-    // Print out mode name.
+        // Print out mode name.
     cout << ModeToString(mode) << flush;
 
     // For each experiment, run 3 times and get the average.
@@ -149,7 +149,7 @@ int main(int argc, char **argv)
   CPU_ZERO(&cs);
 
   // Adjust to CPU count
-  CPU_SET(3, &cs);
+  CPU_SET(7, &cs);
 
   int ret = sched_setaffinity(0, sizeof(cs), &cs);
   if (ret)

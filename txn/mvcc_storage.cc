@@ -123,25 +123,29 @@ void MVCCStorage::Write(Key key, Value value, int txn_unique_id) {
   if (version_list->empty()) {
     // redundant check, check if version_list is empty
     version_list = new deque<Version*>();
+    version_list->push_front(to_write);
+    return;
   }
 
-  version_list->push_front(to_write);
 
   // // Iterate the version_lists
   // // get latest version where write timestamp less than or equal to txn_unique_id.
-  // auto latest_valid_version = version_list->begin();
-  // for (auto itr = version_list->begin(); itr != version_list->end(); itr++) {
-  //   if ((*itr)->version_id_ > (*latest_valid_version)->version_id_ && (*itr)->version_id_ <= txn_unique_id) {
-  //     // get latest version with timestamp less or equal to txn_unique_id
-  //     latest_valid_version = itr;
-  //   }
-  // }
+  auto latest_valid_version = version_list->begin();
+  for (auto itr = version_list->begin(); itr != version_list->end(); itr++) {
+    if ((*itr)->version_id_ > (*latest_valid_version)->version_id_ && (*itr)->version_id_ <= txn_unique_id) {
+      // get latest version with timestamp less or equal to txn_unique_id
+      latest_valid_version = itr;
+    }
+  }
 
-  // if ((*latest_valid_version)->version_id_ == txn_unique_id) {
-  //   // if same timestamp, update value
-  //   (*latest_valid_version)->value_ = value;
-  // } else 
-    // else, create new version
+  if ((*latest_valid_version)->version_id_ == txn_unique_id) {
+    // if same timestamp, update value
+    (*latest_valid_version)->value_ = value;
+    delete to_write;
+  } else {
+    // create new version
+    version_list->push_front(to_write);
+  }
 }
 
 
